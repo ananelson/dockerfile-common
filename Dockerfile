@@ -77,7 +77,8 @@ RUN echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-sel
 RUN apt-get install oracle-java7-installer
 
 ### "create-user"
-RUN useradd -m -p $(perl -e'print crypt("foobarbaz", "aa")') repro
+RUN useradd -m repro
+RUN echo "repro:foobarbaz" | chpasswd
 RUN adduser repro sudo
 
 ### "activate-user"
