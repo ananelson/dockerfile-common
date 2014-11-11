@@ -1,85 +1,130 @@
-FROM                    phusion/baseimage
+FROM                    ubuntu:latest
 MAINTAINER              Ana Nelson <ana@ananelson.com>
 
 ### "localedef"
-RUN localedef -v -c -i en_US -f UTF-8 en_US.UTF-8 || :
-
-### "squid-deb-proxy"
-# Use squid deb proxy (if available on host OS) as per https://gist.github.com/dergachev/8441335
-# Modified by @ananelson to detect squid on host OS and only enable itself if found.
-ENV HOST_IP_FILE /tmp/host-ip.txt
-RUN /sbin/ip route | awk '/default/ { print "http://"$3":8000" }' > $HOST_IP_FILE
-RUN HOST_IP=`cat $HOST_IP_FILE` && curl -s $HOST_IP | grep squid && echo "found squid" && echo "Acquire::http::Proxy \"$HOST_IP\";" > /etc/apt/apt.conf.d/30proxy || echo "no squid"
+RUN locale-gen en_US.UTF-8
 
 ### "apt-defaults"
-RUN echo "APT::Get::Assume-Yes true;" >> /etc/apt/apt.conf.d/80custom
-RUN echo "APT::Get::Quiet true;" >> /etc/apt/apt.conf.d/80custom
+RUN echo "APT::Get::Assume-Yes true;" >> /etc/apt/apt.conf.d/80custom ; \
+    echo "APT::Get::Quiet true;" >> /etc/apt/apt.conf.d/80custom ; \
+    apt-get update ; \
+    apt-get install curl
 
-### "oracle-java-ppa"
-RUN add-apt-repository ppa:webupd8team/java
-
-### "update"
-RUN apt-get update
+### "squid-deb-proxy"
+# Use squid deb proxy only if found on host OS. From https://gist.github.com/dergachev/8441335
+# Need curl installed before 
+RUN HOST_IP_FILE="/tmp/host-ip.txt" ; \
+    /sbin/ip route | awk '/default/ { print "http://"$3":8000" }' > $HOST_IP_FILE ; \
+    HOST_IP=`cat $HOST_IP_FILE` && curl -s $HOST_IP | grep squid && echo "found squid" && \
+    echo "Acquire::http::Proxy \"$HOST_IP\";" > /etc/apt/apt.conf.d/30proxy || echo "no squid"
 
 ### "utils"
-RUN apt-get install build-essential
-RUN apt-get install adduser
-RUN apt-get install curl
-RUN apt-get install sudo
+RUN apt-get install \
+      build-essential \
+      adduser \
+      sudo
 
 ### "nice-things"
-RUN apt-get install ack-grep
-RUN apt-get install strace
-RUN apt-get install vim
-RUN apt-get install git
-RUN apt-get install tree
-RUN apt-get install wget
-RUN apt-get install unzip
-RUN apt-get install rsync
-
-### "texlive"
-RUN apt-get install --no-install-recommends texlive-latex-base
-RUN apt-get install --no-install-recommends texlive-latex-extra
-
-### "python"
-RUN apt-get install python-dev
-RUN apt-get install python-pip
-
-### "dexy"
-RUN pip install dexy
+RUN apt-get install \
+      ack-grep \
+      git \
+      man-db \
+      rsync \
+      strace \
+      tree \
+      unzip \
+      vim \
+      wget
 
 ### "r"
-RUN apt-get install --no-install-recommends r-base
+RUN apt-get install --no-install-recommends \
+      r-base
 
 ### "r-packages"
-ENV CRAN_MIRROR http://cran.case.edu/
-RUN R -e "install.packages(\"stargazer\", repos=\"$CRAN_MIRROR\")"
-RUN R -e "install.packages(\"rjson\", repos=\"$CRAN_MIRROR\")"
+RUN CRAN_MIRROR="http://cran.stat.ucla.edu" ; \
+    echo "local({r <- getOption(\"repos\"); r[\"CRAN\"] <- \"$CRAN_MIRROR\"; options(repos=r)})" >> /usr/lib/R/etc/Rprofile.site ; \
+    R -e "install.packages(\"colorspace\")" ; \
+    R -e "install.packages(\"bitops\")" ;
 
-### "install-phantomjs"
-ENV PHANTOM_VERSION phantomjs-1.9.7-linux-x86_64
+### "python"
+RUN apt-get install \
+      python \
+      python-dev \
+      python-pip
+
+### "dist-dexy"
+RUN pip install dexy
+
+### "workdir-for-src-installs"
 WORKDIR /tmp
-RUN wget --no-verbose https://bitbucket.org/ariya/phantomjs/downloads/$PHANTOM_VERSION.tar.bz2
-RUN tar -xjvf $PHANTOM_VERSION.tar.bz2
-RUN mv $PHANTOM_VERSION/bin/phantomjs /usr/local/bin/
+
+### "source-dexy"
+RUN git clone https://github.com/dexy/dexy && \
+    cd dexy && \
+    pip install -e .
+
+### "source-phantomjs"
+RUN PHANTOM_VERSION="phantomjs-1.9.7-linux-x86_64" ; \
+    wget --no-verbose https://bitbucket.org/ariya/phantomjs/downloads/$PHANTOM_VERSION.tar.bz2 && \
+    tar -xjf $PHANTOM_VERSION.tar.bz2 && \
+    mv $PHANTOM_VERSION/bin/phantomjs /usr/local/bin/ && \
+    phantomjs --version
+
+### "source-casperjs"
+RUN git clone git://github.com/n1k0/casperjs.git && \
+    cd casperjs && \
+    ln -sf `pwd`/bin/casperjs /usr/local/bin/casperjs && \
+    casperjs --version
+
+WORKDIR /tmp
+### "source-zeromq"
+RUN ZEROMQ_VERSION="zeromq-4.0.4" ; \
+    wget --no-verbose http://download.zeromq.org/$ZEROMQ_VERSION.tar.gz && \
+    tar -xzf $ZEROMQ_VERSION.tar.gz && \
+    mv $ZEROMQ_VERSION zeromq && \
+    cd zeromq && \
+    ./configure && \
+    make && \
+    make install && \
+    ldconfig && \
+    pip install pyzmq
 
 ### "fake-fuse-for-openjdk"
-RUN apt-get install fuse || :
-RUN rm -rf /var/lib/dpkg/info/fuse.postinst
-RUN apt-get install fuse
+RUN apt-get install fuse || :; \
+    rm -rf /var/lib/dpkg/info/fuse.postinst && \
+    apt-get install fuse
 
-### "install-jdk"
+### "install-openjdk"
 RUN apt-get install openjdk-7-jdk
 
+### "oracle-java-ppa"
+RUN apt-get install software-properties-common && \
+    add-apt-repository ppa:webupd8team/java && \
+    apt-get update
+
 ### "oracle-java"
-RUN echo debconf shared/accepted-oracle-license-v1-1 select true | debconf-set-selections
-RUN echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-selections
-RUN apt-get install oracle-java7-installer
+RUN echo debconf shared/accepted-oracle-license-v1-1 select true | debconf-set-selections ; \
+    echo debconf shared/accepted-oracle-license-v1-1 seen true | debconf-set-selections ; \
+    apt-get install oracle-java7-installer
+
+### "asciidoctor"
+RUN apt-get install \
+      ruby1.9.1 \
+      ruby1.9.1-dev ; \
+    gem install \
+      asciidoctor \
+      pygments.rb
+
+### "texlive"
+RUN apt-get install --no-install-recommends \
+      texlive-latex-base \
+      texlive-latex-extra \
+      texlive-latex-recommended
 
 ### "create-user"
-RUN useradd -m repro
-RUN echo "repro:foobarbaz" | chpasswd
-RUN adduser repro sudo
+RUN useradd -m repro && \
+    echo "repro:password" | chpasswd ; \
+    echo "repro ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/repro
 
 ### "activate-user"
 ENV HOME /home/repro
